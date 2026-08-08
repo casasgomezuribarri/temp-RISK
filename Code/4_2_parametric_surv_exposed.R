@@ -255,7 +255,7 @@ parapreds1_km <- ggplot(pred1, aes(x = time, y = est, colour = factor(treatment)
         data = median_title,
         aes(x = 20, y = y_pos, label = label),
         hjust = 0, vjust = 0,
-        size = 10, # fontface = "bold",
+        size = 8, # fontface = "bold",
         colour = "black",
         inherit.aes = FALSE
     ) +
@@ -263,7 +263,7 @@ parapreds1_km <- ggplot(pred1, aes(x = time, y = est, colour = factor(treatment)
         data = median_annotations,
         aes(x = 25, y = y_pos, label = label, colour = factor(treatment)),
         hjust = 0, vjust = 0,
-        size = 10, fontface = "bold",
+        size = 8, fontface = "bold",
         inherit.aes = FALSE,
         show.legend = FALSE
     ) +
@@ -299,7 +299,7 @@ parapreds1_km <- ggplot(pred1, aes(x = time, y = est, colour = factor(treatment)
 
 parapreds1_km
 ggsave(plot = parapreds1_km, "Figures/parametric_exposed_km_ann.png", width = 16, height = 12, units = "in", dpi = 150)
-ggsave(plot = parapreds1_km, "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/parametric_km_only_exposed_ann.png", width = 12, height = 9, units = "in", dpi = 150)
+ggsave(plot = parapreds1_km, "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/parametric_km_only_exposed_ann.png", width = 10, height = 7.5, units = "in", dpi = 150)
 
 
 # actual coefficients (output is in log scale)

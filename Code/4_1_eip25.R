@@ -104,7 +104,7 @@ eips <- ggplot(eip_summary, aes(x = treatment, y = mean_eip, color = treatment, 
 
 eips
 ggsave(filename = "Figures/eips.png", plot = eips, width = 16, height = 12)
-ggsave(filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/eips.png", plot = eips, width = 12, height = 9)
+ggsave(filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/eips.png", plot = eips, width = 10, height = 7.5)
 
 # stats (GLM)
 ##################################################################################################################################

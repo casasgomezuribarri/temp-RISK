@@ -1,4 +1,11 @@
-# plot prevalences and intensities against time (oocysts abd sporozoites)
+# plot prevalences over time
+# fit gam model to check for symmetruc logistic growth - not symmetric
+# fit non-linear logistic bayesian model to prevalence data
+# plot posterior prevalence over time (eip cdfs)
+# plot summary of bayesian model (max prev, eip50, eip90-eip10)
+# plot against survival, and plot area under the curve of their product (number of infectious days)
+# plot areas under those curves as scatter plot ± iqr
+
 # author: ivan casas
 
 ##################################################################################################################################
@@ -97,9 +104,9 @@ contrasts(surv_eip$pot) <- contr.sum(nlevels(surv_eip$pot))
 
 
 # First GAM to test for linearity of predictors with link function
-# (i.e. interrogate symmetry of logistic growth for each splitting case)
+# (i.e. interrogate symmetry of logistic growth for each group)
 
-table(surv_eip$species, surv_eip$temp_mean, surv_eip$temp_range) # cell dispersion looks alirht
+table(surv_eip$species, surv_eip$temp_mean, surv_eip$temp_range) # sample sizes are alright
 surv_eip$grp <- interaction(surv_eip$species, surv_eip$temp_mean, surv_eip$temp_range)
 
 m_gam <- gam(
@@ -113,20 +120,21 @@ m_gam <- gam(
 gam.check(m_gam) # tried with k = 20 and no difference. keeping low (default = 10) for speed
 summary(m_gam)
 # look at smooth effects (edf)
-# edf is representative of the degree of complexity to expect
+# edf is representative of the degree of complexity to expect (>1: nonlinear)
 
 
+#  most groups show nonlinear effect of age on eip cdf  (linear logistic not supported):
 #             edf     p
-# s(age):G270   3    **    <- most groups show nonlinear effect of age on eip cdf
-# s(age):C270   4   ***       linear logistic not supported
+# s(age):G270   3    **
+# s(age):C270   4   ***
 # s(age):G210   2   ***
 # s(age):C210   1     *
 # s(age):G276   2    **
 # s(age):C276   2
 # s(age):G216   3    **
 # s(age):C216   2     *
-# s(pot).       0           <- pot isn't explaining much, can be dropped
-# s(replicate)  6           <- replicate is an important random effect, must remain
+# s(pot).       0           pot isn't explaining much, can be dropped
+# s(replicate)  6           replicate is an important random effect, must remain
 
 # plot results
 gam_eip <- draw(m_gam, select = 1:8, ncol = 4)
@@ -134,16 +142,6 @@ gam_eip
 
 ggsave(plot = gam_eip, filename = "Figures/GAM_eip.png", width = 18, height = 12)
 ggsave(plot = gam_eip, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/GAM_eip.png", width = 16, height = 12)
-
-
-# # alternative recipe with aesthetic control: (worth it?...) (nah)
-# sm_data <- smooth_estimates(m_gam, select = paste0("s(age):grp", levels(surv_eip$grp)))
-# ggplot(sm_data, aes(age, .estimate)) +
-#     geom_ribbon(aes(ymin = .estimate - se, ymax = .estimate + se), alpha = 0.2) +
-#     geom_line() +
-#     facet_wrap(~.smooth, ncol = 4)
-# # still needs work
-
 
 # conclusion:
 # most cases show nonlinear growth
@@ -205,7 +203,7 @@ m_slope <- add_criterion(m_slope, "loo") # convergence problems
 comp <- loo_compare(m_upper, m_ed50)
 print(comp, digits = 2)
 z <- comp[2, "elpd_diff"] / comp[2, "se_diff"]
-2 * pnorm(-abs(z))
+2 * pnorm(-abs(z)) # 0.07 - m_ed50 is better but it doesn't really matter that much really
 
 # so, we specify our nonlinear logistic model
 best_model <- m_ed50
@@ -305,13 +303,13 @@ preds <- posterior_epred(best_model, newdata = newdata, re_formula = NA)
 B <- nrow(preds)
 
 newdata$predicted <- apply(preds, 2, median)
-newdata$lower <- apply(preds, 2, quantile, probs = 0.25) # 0.025
-newdata$upper <- apply(preds, 2, quantile, probs = 0.75) # 0.975
+newdata$lower <- apply(preds, 2, quantile, probs = 0.25)
+newdata$upper <- apply(preds, 2, quantile, probs = 0.75)
 
 # survival predictions from flexsurv model
 surv_exp <- filter(surv, exposed == "Exposed") # only with exposed mosquitoes
-best_dist <- "genf" # from 4_1
-m1 <- flexsurvreg(event ~ species * temp_mean * temp_range, data = surv_exp, dist = best_dist) # from 4_1
+best_dist <- "genf" # from paraemtric survival modelling script
+m1 <- flexsurvreg(event ~ species * temp_mean * temp_range, data = surv_exp, dist = best_dist) # from paraemtric survival modelling script
 
 nd1 <- expand.grid(
     species = levels(surv_eip$species),
@@ -352,13 +350,14 @@ eip_dists <- ggplot(newdata, aes(x = age, y = predicted, color = treatment, fill
     ylim(0, 0.8) +
     labs(
         x = "Days post exposure (dpe)",
-        y = "Posterior prevalence & IQR",
+        y = "Posterior prevalence (%) & IQR",
         colour = "Temperature",
+        fill = "Temperature"
     ) +
     theme_minimal() +
     theme(
         panel.grid.minor = element_line(color = "gray"),
-        axis.text = element_text(size = 26),
+        axis.text = element_text(size = 25),
         axis.title = element_text(size = 35),
         axis.line = element_line(colour = "black", linewidth = 0.8),
         axis.ticks = element_line(colour = "black", linewidth = 0.6),
@@ -368,13 +367,30 @@ eip_dists <- ggplot(newdata, aes(x = age, y = predicted, color = treatment, fill
     )
 eip_dists
 ggsave(plot = eip_dists, filename = "Figures/eip_dists.png", width = 18, height = 12)
-ggsave(plot = eip_dists, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/eip_dists.png", width = 16, height = 12)
+ggsave(plot = eip_dists, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/eip_dists.png", width = 10, height = 7.5)
 
+# extract legend for plotting
+eip_dists_legend <- eip_dists + theme(
+    legend.position = "right",
+    legend.text = element_text(size = 15), # dont wanna change the theme in the plot
+    legend.title = element_blank()
+) +
+    guides(
+        color = guide_legend(ncol = 4, title.position = "top"),
+        fill  = guide_legend(ncol = 4, title.position = "top")
+    )
 
-# posterior parameter values (competence / eip50 / eip90-eip10)
+legend_only <- cowplot::get_legend(eip_dists_legend)
+cowplot::save_plot(
+    "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/colormap_2.png",
+    legend_only,
+    base_width = 5,
+    base_height = 1
+)
+
+# posterior parameter values
 ################################################################################################################
-# scale itself means nothing, so instead it's used to calculate
-# som interpercentile range. eip90-eip10 is the standard
+# scale itself means nothing, so instead it's used to calculate eip90-eip10
 
 lookup <- surv_eip %>% # each model names the same thing a different way sfruayibuoehiabvhk
     distinct(species, temp_mean, temp_range) %>%
@@ -388,14 +404,14 @@ post_summary <- post %>% # from earlier, posteriors from the model
     group_by(grp, Parameter) %>%
     summarise(
         Median = median(value),
-        CI_low = quantile(value, .25), # .025
-        CI_high = quantile(value, .75), # .975
+        CI_low = quantile(value, .25),
+        CI_high = quantile(value, .75),
         .groups = "drop"
     ) %>%
     left_join(lookup, by = c("grp" = "grp_clean")) %>%
     mutate(Parameter = factor(Parameter,
         levels = c("asymptote", "ed50", "eip90_eip10"),
-        labels = c("Competence", "EIP50", "EIP90-EIP10")
+        labels = c("Competence (%)", "EIP50 (d)", "EIP90-EIP10 (d)")
     ))
 
 post_params <- ggplot(post_summary, aes(x = treatment, y = Median, color = treatment)) +
@@ -407,26 +423,35 @@ post_params <- ggplot(post_summary, aes(x = treatment, y = Median, color = treat
     theme(
         panel.grid.minor = element_line(color = "gray"),
         axis.text = element_text(size = 26),
+        axis.text.x = element_text(size = 26, angle = 25, hjust = 1),
         axis.title = element_text(size = 35),
         axis.line = element_line(colour = "black", linewidth = 0.8),
         axis.ticks = element_line(colour = "black", linewidth = 0.6),
         plot.margin = margin(10, 10, 10, 10),
-        strip.text = element_text(size = 35, face = "bold"),
+        strip.text = element_text(size = 30, face = "bold"),
         legend.position = "none",
     )
 post_params
 ggsave(plot = post_params, filename = "Figures/post_params.png", width = 16, height = 12)
-ggsave(plot = post_params, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/post_params.png", width = 16, height = 12)
+ggsave(plot = post_params, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/post_params.png", width = 13, height = 9.75)
 
 # both curves and the area under their product
 ################################################################################################################
 
 km1 <- get_km_data(surv_exp, nd1)
 
-surv_eips <- ggplot(sp_prev, aes(x = age, y = mean_prevalence, color = treatment, shape = replicate)) +
+# unify levels so that the legends behave
+treatment_levels <- sort(unique(as.character(sp_prev$treatment)))
+sp_prev$treatment <- factor(sp_prev$treatment, levels = treatment_levels)
+newdata$treatment <- factor(newdata$treatment, levels = treatment_levels)
+pred1$treatment <- factor(pred1$treatment, levels = treatment_levels)
+km1$treatment <- factor(km1$treatment, levels = treatment_levels)
+area_df$treatment <- factor(area_df$treatment, levels = treatment_levels)
+
+surv_eips <- ggplot(sp_prev, aes(x = age, y = mean_prevalence, colour = factor(treatment), shape = replicate)) +
     geom_point(size = 3) + # sp prevalence points empirical
-    geom_line( # parametric prevalence (eip CDF), same colour mapping, no legend duplication
-        data = newdata, aes(x = age, y = predicted, color = treatment),
+    geom_line( # parametric prevalence (eip CDF)
+        data = newdata, aes(x = age, y = predicted, color = factor(treatment)),
         inherit.aes = FALSE, linewidth = 1
     ) +
     scale_shape_manual(values = 1:nlevels(sp_prev$replicate)) +
@@ -442,7 +467,7 @@ surv_eips <- ggplot(sp_prev, aes(x = age, y = mean_prevalence, color = treatment
     ) +
     geom_ribbon(
         data = area_df,
-        aes(x = age, ymin = 0, ymax = area_product, fill = treatment),
+        aes(x = age, ymin = 0, ymax = area_product, fill = factor(treatment)),
         inherit.aes = FALSE, alpha = 0.25
     ) +
     # facet_wrap2(species ~ treatment,
@@ -474,7 +499,7 @@ surv_eips <- ggplot(sp_prev, aes(x = age, y = mean_prevalence, color = treatment
     theme(
         panel.grid.minor = element_line(color = "gray"),
         axis.text = element_text(size = 26),
-        strip.text = element_text(size = 30),
+        strip.text = element_text(size = 30, face = "bold"),
         strip.placement = "top",
         panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
         axis.line = element_line(colour = "black", linewidth = 0.8),
@@ -524,10 +549,7 @@ area_df <- area_df %>%
 mean(area_df$proportion)
 
 
-# if the areas are similar, the extrapolated part is not driving much of the results seen
-
-
-# INFECTIOUS DAYS: full posterior propagation + CI
+# infectious days
 ################################################################################################################
 
 pred1_aligned <- newdata %>%
@@ -543,19 +565,6 @@ S_t_draws <- sapply(seq_len(nrow(pred1_aligned)), function(i) {
 
 # elementwise product
 area_draws <- preds[, pred1_aligned$row_id] * S_t_draws
-
-# # summarise into medians + IQR
-# area_ci <- newdata %>%
-#     mutate(
-#         area_median = apply(area_draws, 2, median),
-#         area_lower  = apply(area_draws, 2, quantile, probs = 0.25), # 0.025
-#         area_upper  = apply(area_draws, 2, quantile, probs = 0.75) # 0.975
-#     )
-# # area_ci has one row per (age, species, treatment) with a proper
-# # CI on EIP x S(t), combining brms posterior uncertainty wiht
-# # flexsurv logit-normal bootstrap uncertainty
-# # (independence assumption)
-
 
 # area under the product
 groups_tbl <- newdata %>%
@@ -580,7 +589,7 @@ auc_summary <- pmap_dfr(groups_tbl, function(species, treatment, row_ids) {
 print(auc_summary, n = Inf)
 
 
-auc_plot <- ggplot(auc_summary, aes(x = treatment, y = AUC_median, color = treatment, shape = species)) +
+auc_plot <- ggplot(auc_summary, aes(x = treatment, y = AUC_median, color = treatment)) +
     geom_point(size = 8) +
     geom_errorbar(aes(ymin = AUC_low, ymax = AUC_high), width = 0.15, linewidth = 0.8) +
     facet_wrap(~species, scales = "free_x") +
@@ -601,63 +610,3 @@ auc_plot <- ggplot(auc_summary, aes(x = treatment, y = AUC_median, color = treat
 auc_plot
 ggsave(plot = auc_plot, filename = "Figures/inf_days.png", width = 18, height = 12)
 ggsave(plot = auc_plot, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/inf_days.png", width = 16, height = 12)
-
-
-# sensitivity analysis of force of infection (infectious days)
-################################################################################################################
-
-# Requires: newdata, preds, S_t_draws, pred1_aligned, area_draws, groups_tbl
-# (all already built in risk_analysis_consolidated.R)
-
-# ---- 1. build "one source varies, the other held at its median" AUC draws ----
-# This is a one-at-a-time (OAT) sensitivity analysis: for each group, we
-# recompute the AUC three ways —
-#   (a) both EIP and survival draws vary   -> total uncertainty (already have this)
-#   (b) only EIP varies, survival fixed at its median curve -> EIP's contribution
-#   (c) only survival varies, EIP fixed at its median curve -> survival's contribution
-# Comparing the variance of (b) and (c) against (a) tells you which model is
-# driving most of the uncertainty in the final product.
-
-sensitivity <- pmap_dfr(groups_tbl, function(species, treatment, row_ids) {
-    idx <- match(row_ids, newdata$row_id)
-
-    eip_draws <- preds[, idx, drop = FALSE] # B x n_ages, varies across posterior
-    surv_draws <- S_t_draws[, idx, drop = FALSE] # B x n_ages, varies across simulation
-
-    eip_median_curve <- apply(eip_draws, 2, median) # fixed curve, 1 x n_ages
-    surv_median_curve <- apply(surv_draws, 2, median) # fixed curve, 1 x n_ages
-
-    # (a) both vary — total AUC uncertainty
-    auc_total <- rowSums(eip_draws * surv_draws)
-
-    # (b) only EIP varies — survival held at its median curve
-    auc_eip_only <- rowSums(eip_draws * matrix(surv_median_curve,
-        nrow = nrow(eip_draws),
-        ncol = ncol(eip_draws), byrow = TRUE
-    ))
-
-    # (c) only survival varies — EIP held at its median curve
-    auc_surv_only <- rowSums(matrix(eip_median_curve,
-        nrow = nrow(surv_draws),
-        ncol = ncol(surv_draws), byrow = TRUE
-    ) * surv_draws)
-
-    var_total <- var(auc_total)
-    var_eip <- var(auc_eip_only)
-    var_surv <- var(auc_surv_only)
-
-    tibble(
-        species = species,
-        treatment = treatment,
-        Var_total = var_total,
-        Var_EIP_only = var_eip,
-        Var_Survival_only = var_surv,
-        Pct_from_EIP = 100 * var_eip / var_total,
-        Pct_from_Survival = 100 * var_surv / var_total,
-        # if these two don't sum to ~100%, the remainder reflects interaction
-        # between the two sources (expected for a product of two random terms)
-        Pct_interaction = 100 - (100 * var_eip / var_total) - (100 * var_surv / var_total)
-    )
-})
-
-print(sensitivity, n = Inf, width = Inf)

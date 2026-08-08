@@ -140,7 +140,7 @@ stat_results
 #    4. Steps 3-4 are repeated B (=5000) times
 #    5. p-value is the proportion of ks distances that are greater than the analytic ks.
 
-#    p-value answers these questions:
+#    p-value answers:
 #    how often is the KS statistic from the null pairs greater than or equal to the deterministic one?
 
 
@@ -232,10 +232,11 @@ otau_sp <- ggplot(eip_tau, aes(x = species, y = O_tau, color = treatment, shape 
 
 otau_sp
 
-# save plot
+# save plot - this is the supplementary figure
 ggsave(plot = otau_sp, paste0("Figures/", plot_names, "_P(T>tau)otau_sp.png"), width = 23, height = 12)
 ggsave(plot = otau_sp, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/otau_sp.png", width = 16, height = 12)
 
+str(eip_tau)
 
 # no show all temps by species
 otaus <- ggplot(eip_tau, aes(x = treatment, y = O_tau, color = treatment, shape = species)) +
@@ -244,7 +245,8 @@ otaus <- ggplot(eip_tau, aes(x = treatment, y = O_tau, color = treatment, shape 
   labs(x = "", y = "Probability of outliving EIP", title = "") +
   ylim(0, 1) +
   scale_color_manual(values = selected_colors) +
-  theme_minimal(base_size = 18) +
+  scale_x_discrete(labels = function(x) substr(x, 1, 4)) + # quick fix to remove the degree celsius symbol
+  theme_minimal() +
   facet_wrap(~species, scales = "free") +
   guides(
     color = guide_legend(ncol = 2, title = "Treatment", title.position = "top"),
@@ -269,14 +271,18 @@ otaus
 
 # save plot
 ggsave(plot = otaus, paste0("Figures/", plot_names, "_P(T>tau)otau.png"), width = 16, height = 12)
-ggsave(plot = otaus, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/otau.png", width = 16, height = 12)
+ggsave(plot = otaus, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/otau.png", width = 10, height = 7.5)
 
 # extract legend for plotting
-otaus_legend <- otaus + theme(legend.position = "right")
+otaus_legend <- otaus + theme(
+  legend.position = "right",
+  legend.text = element_text(size = 15), # dont wanna change the theme in the plot
+  legend.title = element_text(size = 20)
+) # but this legend text is tiny!
 legend_only <- cowplot::get_legend(otaus_legend)
 cowplot::save_plot(
   "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/colormap.png",
   legend_only,
-  base_width = 5, # wide enough for horizontal legend
-  base_height = 3 # short since it's just one row
+  base_width = 4,
+  base_height = 3
 )
