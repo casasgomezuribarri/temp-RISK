@@ -86,11 +86,15 @@ cond_surv_heatmap <- cond_surv_plot(cond_surv, ncol_hm = 4)
 
 selected_colors <- c("#0c36f6", "#5a8cd1", "#da0000", "#e976d6")
 
+exposure_ages <- surv |> dplyr::select(replicate, pot, exp_age)
+
 eip_summary <- eip |>
+  left_join(exposure_ages, by = c("replicate", "pot")) |> # add age at exposure
+  mutate(eip_abs = eip + exp_age) |> # eip in days since emergence (original is in dpe)
   group_by(pot) |>
   summarise(
-    mean_eip = mean(eip, na.rm = TRUE),
-    se_eip = sd(eip, na.rm = TRUE) / sqrt(sum(!is.na(eip))), # se = sd / sqrt(n)
+    mean_eip = mean(eip_abs, na.rm = TRUE),
+    se_eip = sd(eip_abs, na.rm = TRUE) / sqrt(sum(!is.na(eip_abs))), # se = sd / sqrt(n)
     .groups = "drop"
   ) |>
   mutate(treatment = paste0(substr(pot, 3, 4), "±", substr(pot, 5, 5)))

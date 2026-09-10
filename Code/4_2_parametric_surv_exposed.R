@@ -94,6 +94,8 @@ best_dist <- "genf"
 
 m1 <- flexsurvreg(event ~ species * temp_mean * temp_range, data = surv_exp, dist = best_dist)
 report <- tidy(m1)
+
+print(report)
 view(report)
 
 # p computation - type iii analysis framework. This is not supported in car pkg, so we do it manually:

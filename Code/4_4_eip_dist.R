@@ -132,6 +132,7 @@ ggplot(combined_prev, aes(x = age, y = prevalence, color = treatment, weight = n
 surv_eip <- surv |> # one row per mosquito
     filter(
         surv$exposed == "Exposed", # only exposed
+        # !(surv$replicate %in% c("r00", "r01", "r02", "r03")), # considered removing replicates with qpcr but no dissection, but fit was worse
         !is.na(surv$label_pf) # only qpcr'ed
     ) |>
     select( # select the cols that are useulf for this analysis
@@ -441,24 +442,25 @@ m_upper <- brm(bform_upper,
     data = surv_eip, family = bernoulli(link = "identity"),
     prior = priors_upper, chains = 4, cores = 4, iter = 4000,
     control = list(adapt_delta = 0.95, max_treedepth = 12)
-) # no warnings, clean convergence
+) # no warnings, clean convergence (r>4: 4 divergent transitions)
 
 m_eip50 <- brm(bform_eip50,
     data = surv_eip, family = bernoulli(link = "identity"),
     prior = priors_eip, chains = 4, cores = 4, iter = 4000,
     control = list(adapt_delta = 0.95, max_treedepth = 12)
-) # clean convergence too
+) # clean convergence too (r>4: 11 divergent transitions)
 
 m_slope <- brm(bform_slope,
     data = surv_eip, family = bernoulli(link = "identity"),
     prior = priors_slope, chains = 4, cores = 4, iter = 4000,
     control = list(adapt_delta = 0.95, max_treedepth = 12)
-) # same here
+) # same here (r>4: 3 divergent transitions, high rhat, low tail and bulk ess)
 
-summary(m_slope)
-summary(m_eip50)
 summary(m_upper)
-# most important thing is that all Rhat are 1. not true for m_slope
+summary(m_eip50)
+summary(m_slope) # (r>4: >1 rhat, low tail and bulk ess)
+
+# most important thing is that all Rhat are
 
 loo(m_slope)
 loo(m_eip50)
@@ -473,8 +475,8 @@ m_slope <- add_criterion(m_slope, "loo")
 comp <- loo_compare(m_upper, m_eip50, m_slope)
 print(comp, digits = 2)
 
-# loo comparison suggests that placing the random effect on upper makes most sense
-# also it's the cleanest fit, and also makes most sense biologically.
+# loo comparison suggests that placing the random effect on upper makes most sense (indistinguishable from putting it on eip50)
+# m_upper is the cleanest fit, and also makes most sense biologically.
 
 bayesplot_theme_set(theme_default(base_size = 25)) # increase font size
 
@@ -539,7 +541,7 @@ summary(best_model)
 # RHAt should be 1 (defo not >1) - good
 # BulkESS and Tail ESS in the thousands - good
 
-# make predictions and explore effects as predicted differences
+# make predictions and explore effects as differences in predicted parameters
 draws <- as_draws_df(best_model)
 groups <- unique(surv_eip$pot)
 
@@ -587,19 +589,17 @@ contrasts <- list(
     "Trange for AG 27" = c("ki270", "ki276")
 )
 
-# helpre to build table
+# helpre to build table - this summarises the parameter differences across the n=8000 draws
 summarise_diff <- function(x) {
     n_total <- length(x)
     x <- x[is.finite(x)]
-    n_dropped <- n_total - length(x)
+    n_dropped <- n_total - length(x) # drop cases where predicted diffs are Inf (if any)
     tibble(
         Median = median(x),
         CI_low = unname(quantile(x, .025)),
         CI_high = unname(quantile(x, .975)),
         pd_manual = max(mean(x > 0), mean(x < 0)), # probability of direction (proportion of draws on one side of 0)
-        # pd = as.numeric(p_direction(x)),
-        # pct_in_rope = rope(x, range = rope_range, ci = 1)$ROPE_Percentage,
-        n_dropped = n_dropped # how many draws were non-finite? (need to be discarded for calculating eip90-eip10)
+        n_dropped = n_dropped # how many diffs were non-finite? (need to be discarded for calculating eip90-eip10)
     )
 }
 
@@ -612,7 +612,7 @@ table <- map_dfr(names(contrasts), function(cname) { # for each relevant compari
         diff <- d1[[p]] - d2[[p]] # calculate their differences (in post, one row is one posterior draw)
         bind_cols(Comparison = cname, Parameter = p, summarise_diff(diff)) # summarise according to summarise_diff
     })
-}) %>%
+}) %>% # round and order rows
     mutate(across(c(Median, CI_low, CI_high, pd_manual), ~ round(., 3))) %>%
     arrange(Parameter, Comparison)
 
@@ -658,6 +658,7 @@ eip_grid <- expand.grid(
 eip_preds <- posterior_epred(best_model, newdata = eip_grid, re_formula = NA)
 B <- nrow(eip_preds)
 
+# add to eip_grid (summarised)
 eip_grid$predicted <- apply(eip_preds, 2, median)
 eip_grid$lower <- apply(eip_preds, 2, quantile, probs = 0.25)
 eip_grid$upper <- apply(eip_preds, 2, quantile, probs = 0.75)
@@ -697,7 +698,7 @@ age_idx <- match(eip_grid$age, ages_grid)
 S_t_median <- apply(S_t_array, c(2, 3), median) # median S(t) for each age*pot (dims 2, 3; now rows and cols)
 eip_grid$S_t <- S_t_median[cbind(age_idx, group_idx)] # add to eip_grid
 
-# for each row in eip_grid (pot*age, here treated as columns), add the survival preds (B rows)
+# for each row in eip_grid (pot*age, here treated as columns), record all survival preds (B rows)
 S_t_draws <- sapply(seq_len(nrow(eip_grid)), function(i) S_t_array[, age_idx[i], group_idx[i]])
 
 # now eip cdf predictions and survival estimates have the same structure
@@ -707,14 +708,15 @@ str(S_t_draws)
 
 # element-wise product of eip_preds * S_t_draws is the probability of being alive and infectious
 area_draws <- eip_preds * S_t_draws
+str(area_draws)
 # for age*pot combination, and for every posterior draw from EIP and surv
 
-# summarise area_draws (median ± iqr)
+# summarise area_draws (median ± iqr) and add to eip_grid
 eip_grid$area_product <- apply(area_draws, 2, median) # median across 2nd dim (for each column)
 eip_grid$area_product_lower <- apply(area_draws, 2, quantile, probs = 0.25)
 eip_grid$area_product_upper <- apply(area_draws, 2, quantile, probs = 0.75)
 
-area_df <- eip_grid
+area_df <- eip_grid # deserves renaming
 
 # EIP posterior curves
 ################################################################################################################
@@ -727,8 +729,8 @@ eip_dists <- ggplot(eip_grid, aes(x = age, y = predicted, color = treatment, fil
     scale_fill_manual(values = selected_colors) +
     ylim(0, 0.8) +
     labs(
-        x = "Days post exposure (dpe)",
-        y = "Posterior prevalence (%) & IQR",
+        x = "Mosquito age (days)",
+        y = "Posterior prevalence ± IQR",
         colour = "Temperature",
         fill = "Temperature"
     ) +
@@ -768,7 +770,7 @@ cowplot::save_plot(
 
 # posterior parameter values
 ################################################################################################################
-# scale itself means nothing, so instead it's used to calculate eip90-eip10
+# slope itself means nothing, so instead it's used to calculate eip90-eip10
 
 lookup <- surv_eip %>% # each model names the same thing a different way sfruayibuoehiabvhk
     distinct(species, temp_mean, temp_range, pot) %>%
@@ -776,7 +778,7 @@ lookup <- surv_eip %>% # each model names the same thing a different way sfruayi
         treatment = paste0(temp_mean, "±", temp_range)
     )
 
-post_summary <- post %>% # from earlier, posteriors from the model
+post_summary <- post %>% # posteriors from the eip model
     pivot_longer(c(asymptote, eip50, eip90_eip10), names_to = "Parameter", values_to = "value") %>%
     group_by(pot, Parameter) %>%
     summarise(
@@ -794,8 +796,14 @@ post_summary <- post %>% # from earlier, posteriors from the model
 post_params <- ggplot(post_summary, aes(x = treatment, y = Median, color = treatment)) +
     geom_pointrange(aes(ymin = CI_low, ymax = CI_high), linewidth = 1, size = 2) +
     facet_grid2(species ~ Parameter, scales = "free", independent = "all") + # facet_wrap doesnt allow side titles :(
-    labs(x = "Treatment", y = "Posterior estimate (median & IQR)") +
-    # ylim(0, 0.8) + # do this only for the first column, not all plots....
+    labs(x = "Treatment", y = "Posterior estimate (median ± IQR)") +
+    facetted_pos_scales(
+        y = list(
+            Parameter == "Competence (%)" ~ scale_y_continuous(limits = c(0, 1)),
+            Parameter == "EIP50 (d)" ~ scale_y_continuous(limits = c(0, 50)),
+            Parameter == "EIP90-EIP10 (d)" ~ scale_y_continuous(limits = c(0, 50))
+        )
+    ) +
     scale_color_manual(values = selected_colors) +
     theme_minimal() +
     theme(
@@ -813,7 +821,7 @@ post_params
 ggsave(plot = post_params, filename = "Figures/post_params.png", width = 16, height = 12)
 ggsave(plot = post_params, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/post_params.png", width = 13, height = 9.75)
 
-# both curves and the area under their product
+# both curves and the area under their product - main figure 1
 ################################################################################################################
 
 km1 <- get_km_data(surv_exp, surv_grid) # see functions.r
@@ -822,18 +830,17 @@ km1 <- get_km_data(surv_exp, surv_grid) # see functions.r
 treatment_levels <- sort(unique(as.character(sp_prev$treatment)))
 sp_prev$treatment <- factor(sp_prev$treatment, levels = treatment_levels)
 eip_grid$treatment <- factor(eip_grid$treatment, levels = treatment_levels)
-# pred1$treatment <- factor(pred1$treatment, levels = treatment_levels)
 km1$treatment <- factor(km1$treatment, levels = treatment_levels)
 area_df$treatment <- factor(area_df$treatment, levels = treatment_levels)
 
-surv_eips <- ggplot(sp_prev, aes(x = age, y = prevalence, colour = factor(treatment), shape = replicate)) +
-    geom_point(size = 3) + # sp prevalence points empirical
+surv_eips <- ggplot(combined_prev, aes(x = age, y = prevalence, colour = factor(treatment), shape = replicate)) +
+    geom_point(size = 3) + # prevalence points (empirical)
+    scale_shape_manual(values = 1:nlevels(sp_prev$replicate)) + # shaped by replicate
     geom_line( # parametric prevalence (eip CDF)
         data = eip_grid, aes(x = age, y = predicted, color = factor(treatment)),
         inherit.aes = FALSE, linewidth = 1
     ) +
-    scale_shape_manual(values = 1:nlevels(sp_prev$replicate)) +
-    geom_line( # parametric survival
+    geom_line( # parametric survival (flexsurvreg)
         data = area_df,
         aes(x = age, y = S_t, colour = factor(treatment)),
         linewidth = 1, inherit.aes = FALSE
@@ -843,10 +850,10 @@ surv_eips <- ggplot(sp_prev, aes(x = age, y = prevalence, colour = factor(treatm
         aes(x = time, y = est, colour = factor(treatment)),
         linewidth = 1, inherit.aes = FALSE
     ) +
-    geom_ribbon(
+    geom_ribbon( # product of the two lines
         data = area_df,
         aes(x = age, ymin = 0, ymax = area_product, fill = factor(treatment)),
-        inherit.aes = FALSE, alpha = 0.25
+        inherit.aes = FALSE, alpha = 0.45
     ) +
     # geom_ribbon(data = area_df, # uncertainty around area - looks horrible
     #             aes(x = age, ymin = area_product_lower, ymax = area_product_upper, fill = factor(treatment)),
@@ -857,7 +864,7 @@ surv_eips <- ggplot(sp_prev, aes(x = age, y = prevalence, colour = factor(treatm
     ) +
     scale_color_manual(values = selected_colors) +
     scale_fill_manual(values = selected_colors) +
-    scale_y_continuous(
+    scale_y_continuous( # both axis have the same scale, but different names
         name = "Proportion alive at time t, S(t)",
         sec.axis = sec_axis(~., name = "Proportion infectious at time t, Prev(t)")
     ) +
@@ -867,7 +874,7 @@ surv_eips <- ggplot(sp_prev, aes(x = age, y = prevalence, colour = factor(treatm
         fill = "Temperature",
         shape = "Replicate"
     ) +
-    guides(
+    guides( # format legend
         shape = guide_legend(order = 1, ncol = 5, title.position = "top"),
         color = guide_legend(order = 2, ncol = 2, title.position = "top"),
         fill  = guide_legend(order = 2, ncol = 2, title.position = "top")
@@ -895,69 +902,61 @@ ggsave(plot = surv_eips, filename = "Figures/surv_eip.png", width = 18, height =
 ggsave(plot = surv_eips, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/surv_eip.png", width = 20, height = 14)
 
 
-# wee sensitivity check for the extrapolation of KMs
+# wee sensitivity check for the extrapolation of survival curves - how much of the area relies on this?
 ################################################################################################################
 
+# list of the latest death observed per pot
 last_death <- surv_exp %>%
     filter(dead == TRUE) %>%
     group_by(species, temp_mean, temp_range) %>%
     summarise(max_death_day = max(age))
 
-area_df %>%
-    left_join(last_death, by = c("species", "temp_mean", "temp_range")) %>%
-    group_by(species, temp_mean, temp_range) %>%
-    summarise(pct_mass_extrapolated = sum(S_t[age > max_death_day]))
+# now compute how much of the area belongs to times > max_death_day for each pot
+area_df_truncated <- area_df %>% # join area_df and last_death in a new df (to not pollute original)
+    left_join(last_death, by = c("species", "temp_mean", "temp_range")) %>% # add last death col (max_death_day)
+    group_by(species, treatment) %>% # for each pot
+    summarise(
+        prop_surv_extrapolated = sum(S_t[age > max_death_day]) / sum(S_t),
+        area_total = sum(area_product), # total area
+        area_extrapolated = sum(area_product[age > max_death_day]), # area mass of ages with extrapolated survival
+        extr_proportion = area_extrapolated / area_total, # proportion of mass from extrapolated ages
+        extr_diff = area_total - area_extrapolated, # absolute difference of total and extrapolated masses
+    )
 
-area_df_truncated <- area_df %>%
-    left_join(last_death, by = c("species", "temp_mean", "temp_range")) %>%
-    filter(age <= max_death_day) %>%
-    group_by(species, treatment) %>%
-    summarise(area_truncated = sum(area_product))
+# print the useful part
+print(area_df_truncated %>% select(species, treatment, area_total, extr_proportion))
 
-area_sensitivity <- area_df %>%
-    group_by(species, treatment) %>%
-    summarise(area_df_truncated_full = sum(area_product)) |>
-    left_join(area_df_truncated, by = c("species", "treatment")) |>
-    mutate(
-        diff = abs(area_df_truncated_full - area_truncated), # amount of area from extrapolated survival
-        proportion = diff / area_df_truncated_full
-    ) # proportion of total area
+# mean
+weighted.mean(area_df_truncated$extr_proportion)
 
-mean(area_sensitivity$proportion)
-
-
-# infectious days
+# infectious days - main figure 2
 ################################################################################################################
 
-# area under the product
-groups_tbl <- eip_grid %>%
-    distinct(species, treatment, row_id) %>%
+# quantify area under the product
+groups_tbl <- eip_grid %>% # log row_ids of each pot (sp*treatment)
     group_by(species, treatment) %>%
     summarise(row_ids = list(row_id), .groups = "drop")
 
-auc_summary <- pmap_dfr(groups_tbl, function(species, treatment, row_ids) {
-    idx <- match(row_ids, eip_grid$row_id)
-
-    auc_draws <- rowSums(area_draws[, idx, drop = FALSE]) # discrete sum, per posterior draw
-
-    tibble(
+auc_summary <- pmap_dfr(groups_tbl, function(species, treatment, row_ids) { # using groups_tbl
+    idx <- match(row_ids, eip_grid$row_id) # find relevant ids in eip_grid
+    auc_draws <- rowSums(area_draws[, idx, drop = FALSE]) # for each row (draws), sum all columns (filtered by idx)
+    tibble( # summarise for plotting
         species = species,
         treatment = treatment,
         AUC_median = median(auc_draws),
-        AUC_low = quantile(auc_draws, 0.25), # 0.025
-        AUC_high = quantile(auc_draws, 0.75) # 0.975
+        AUC_low = quantile(auc_draws, 0.25),
+        AUC_high = quantile(auc_draws, 0.75)
     )
 })
 
-print(auc_summary, n = Inf)
-
+print(auc_summary)
 
 auc_plot <- ggplot(auc_summary, aes(x = treatment, y = AUC_median, color = treatment)) +
     geom_point(size = 8) +
     geom_errorbar(aes(ymin = AUC_low, ymax = AUC_high), width = 0.15, linewidth = 0.8) +
     facet_wrap(~species, scales = "free_x") +
     scale_color_manual(values = selected_colors) +
-    labs(x = NULL, y = "Area under predicted infectious-prevalence curve\n(IQR)") +
+    labs(x = NULL, y = "Mean infectious days per mosquito ± IQR") +
     theme_minimal(base_size = 14) +
     theme(
         panel.grid.minor = element_line(color = "gray"),
@@ -987,7 +986,7 @@ spaghetti_grid <- expand.grid(
     pot = levels(surv_eip$pot)
 ) |>
     left_join(pot_lookup, by = "pot") |>
-    inner_join(obs_combos, by = "pot") |> # one row per age*pot*replicate
+    inner_join(obs_combos, by = "pot", relationship = "many-to-many") |> # one row per age*pot*replicate
     mutate(treatment = paste0(temp_mean, "±", temp_range, "°C"))
 
 # rerun posterior draws with replicate random effect included (re_formulla = NULL)
