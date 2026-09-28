@@ -30,6 +30,7 @@ packages <- c(
     "mgcv",
     "nlme",
     "flexsurv",
+    "patchwork",
     "dplyr",
     "tidyverse",
     "betareg",
@@ -224,7 +225,28 @@ summary(m_gam) # statistical inference
 
 # plot results
 gam_eip <- draw(m_gam, select = 1:8, ncol = 4)
-gam_eip # this is cool
+gam_eip # this is cool but needs tweaking
+
+# add titles by hand (check with og draw output to confirm they're right)
+# i actually prefer to use the subtitles, its neater
+
+new_titles <- c(
+    "", "", "", "",
+    "", "", "", ""
+)
+new_subtitles <- c(
+    "An. coluzzii, 21±0", "An. coluzzii, 21±6", "An. coluzzii, 27±0", "An. coluzzii, 27±6",
+    "An. gambiae, 21±0", "An. gambiae, 21±6", "An. gambiae, 27±0", "An. gambiae, 27±6"
+)
+
+for (i in seq_along(new_titles)) {
+    gam_eip[[i]] <- gam_eip[[i]] + labs(title = new_titles[i], subtitle = new_subtitles[i])
+}
+
+# change font size
+gam_eip <- gam_eip & theme(text = element_text(size = 20)) # '&' so that it applies to all subplots
+
+gam_eip
 
 ggsave(plot = gam_eip, filename = "Figures/GAM_eip.png", width = 18, height = 12)
 ggsave(plot = gam_eip, filename = "/Users/ivancasas/GitHub/Thesis/Chapters/04_RISK/pics/GAM_eip.png", width = 16, height = 12)
