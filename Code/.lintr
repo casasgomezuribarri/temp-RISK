@@ -1,2 +1,0 @@
-linters: with_defaults(line_length_linter = NULL) # stop warning for lines > 80 characters
-linters: linters_with_defaults(line_length_linter = NULL)
